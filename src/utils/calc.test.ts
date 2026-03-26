@@ -4,7 +4,6 @@ const usuariosMock: Usuario[] = [
   { id: 1, nome: "Ana", ativo: true },
   { id: 2, nome: "Bruno", ativo: false },
   { id: 3, nome: "Carlos", ativo: true },
-  { id: 4, nome: "Pedro", ativo: true },
 ];
 
 describe("Funções utilitárias", () => {
