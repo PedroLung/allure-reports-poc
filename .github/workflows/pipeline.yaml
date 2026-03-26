@@ -30,10 +30,10 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Download Allure history from S3
-        run: |
-          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/ allure-results/history/ \
-            --recursive || echo "No history found, starting fresh"
+      #- name: Download Allure history from S3
+      #  run: |
+      #    aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/ allure-results/history/ \
+      #      --recursive || echo "No history found, starting fresh"
 
       - name: Run tests
         run: npm test
