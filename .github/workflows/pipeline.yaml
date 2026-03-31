@@ -32,12 +32,17 @@ jobs:
 
       - name: Download Allure history from S3
         run: |
-          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/ allure-results/history/ \
-            --recursive || echo "No history found, starting fresh"
+          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/ /tmp/allure-history/ \
+          --recursive || echo "No history found, starting fresh"
 
       - name: Run tests
         run: npm test
         continue-on-error: true
+
+      - name: Restore history after tests
+        run: |
+          mkdir -p allure-results/history
+          cp -r /tmp/allure-history/. allure-results/history/ || echo "No history to restore"
 
       - name: Debug allure-results
         run: ls -la allure-results/ && ls -la allure-results/history/ || echo "Pastas vazias ou inexistentes"
