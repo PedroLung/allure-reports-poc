@@ -39,6 +39,9 @@ jobs:
         run: npm test
         continue-on-error: true
 
+      - name: Debug allure-results
+        run: ls -la allure-results/ && ls -la allure-results/history/ || echo "Pastas vazias ou inexistentes"
+
       - name: Generate Allure Report
         run: |
           npm install -g allure-commandline
