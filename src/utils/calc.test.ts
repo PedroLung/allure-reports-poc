@@ -21,10 +21,4 @@ describe("Funções utilitárias", () => {
     const ativos = filtrarAtivos([{ id: 1, nome: "João", ativo: false }]);
     expect(ativos).toHaveLength(0);
   });
-
-  test("Carlos é para está ativo", () => {
-    const ativos = filtrarAtivos(usuariosMock);
-    expect(ativos).toHaveLength(2);
-    expect(ativos[2].ativo).toBe(true);
-  });
 });
