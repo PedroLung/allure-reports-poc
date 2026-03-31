@@ -6,6 +6,8 @@ const usuariosMock: Usuario[] = [
   { id: 3, nome: "Carlos", ativo: true },
 ];
 
+// vou dar mais um push aqui
+
 describe("Funções utilitárias", () => {
   test("deve somar dois números corretamente", () => {
     expect(somar(2, 3)).toBe(5);
