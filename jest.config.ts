@@ -1,13 +1,13 @@
+import os from "node:os";
+
 export default {
   preset: "ts-jest",
-  testEnvironment: "node",
-  reporters: [
-    "default",
-    [
-      "jest-allure2-reporter",
-      {
-        resultsDir: "allure-results",
-      },
-    ],
-  ],
+  testEnvironment: "allure-jest/node",
+  testEnvironmentOptions: {
+    environmentInfo: {
+      os_platform: os.platform(),
+      os_release: os.release(),
+      node_version: process.version,
+    },
+  },
 };
