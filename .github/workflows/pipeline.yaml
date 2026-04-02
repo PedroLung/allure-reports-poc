@@ -61,5 +61,8 @@ jobs:
 
       - name: Upload history back to S3
         run: |
-          aws s3 sync allure-report/history/ s3://${{ secrets.S3_BUCKET }}/history/ \
-          --delete
+          if [ -d "allure-report/history" ]; then
+            aws s3 sync allure-report/history/ s3://${{ secrets.S3_BUCKET }}/history/ --delete
+          else
+            echo "No history folder found, skipping upload"
+          fi
