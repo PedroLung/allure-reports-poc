@@ -24,9 +24,6 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Install Allure CLI (v3)
-        run: npm install -g allure
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -57,7 +54,7 @@ jobs:
       - name: Generate Allure Report
         run: |
           rm -rf allure-report
-          allure generate allure-results -o allure-report
+          node node_modules/allure/cli.js generate allure-results -o allure-report
 
       - name: Upload history back to S3
         run: |
@@ -66,3 +63,7 @@ jobs:
           else
             echo "No history folder found, skipping upload"
           fi
+
+      - name: Upload Allure Report to S3
+        run: |
+          aws s3 sync allure-report/ s3://${{ secrets.S3_BUCKET }}/report/ --delete
