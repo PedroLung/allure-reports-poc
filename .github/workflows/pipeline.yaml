@@ -30,34 +30,33 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      # ... (setup anterior igual)
+
       - name: Download Allure history from S3
         run: |
-          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/history.jsonl ./history.jsonl \
-          || echo "No history found, starting fresh"
+          # Criamos a pasta se não existir para evitar erros de permissão
+          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/history.jsonl ./history.jsonl || echo "No history found"
 
       - name: Run tests
         run: npm test
         continue-on-error: true
 
-      - name: Debug allure-results
-        run: |
-          echo "=== allure-results ==="
-          ls -la allure-results/ || echo "no allure-results"
-          echo "=== history.jsonl ==="
-          ls -la history.jsonl || echo "no history.jsonl"
-
       - name: Generate Allure Report
-        run: npm run allure:generate
+        run: |
+          # Garante que o allure vai rodar mesmo se os testes falharem
+          # O Allure v3 usa o allure.config.js automaticamente
+          npm run allure:generate
 
       - name: Upload history back to S3
+        if: always() # Importante: salvar o histórico mesmo se o teste falhar
         run: |
           if [ -f "history.jsonl" ]; then
-            aws s3 cp history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl --only-show-errors
-            echo "✅ History.jsonl uploaded to S3"
-          else
-            echo "No history file found, skipping upload"
+            aws s3 cp history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
+            echo "✅ History.jsonl atualizado no S3"
           fi
 
       - name: Upload Allure Report to S3
+        if: always()
         run: |
+          # O sync com --delete é ótimo para manter o report limpo
           aws s3 sync allure-report/ s3://${{ secrets.S3_BUCKET }}/report/ --delete
