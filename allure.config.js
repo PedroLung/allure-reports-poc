@@ -1,5 +1,6 @@
 export default {
   output: "allure-report",
   clean: true,
-  // history já é automático no Allure 3
+  historyPath: "./history.jsonl", // ← isso ativa o histórico
+  appendHistory: true,
 };

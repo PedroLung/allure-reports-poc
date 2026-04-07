@@ -32,34 +32,30 @@ jobs:
 
       - name: Download Allure history from S3
         run: |
-          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/ /tmp/allure-history/ \
-          --recursive || echo "No history found, starting fresh"
+          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/history.jsonl ./history.jsonl \
+          || echo "No history found, starting fresh"
 
       - name: Run tests
         run: npm test
         continue-on-error: true
 
-      - name: Restore history after tests
-        run: |
-          mkdir -p allure-results/history
-          cp -r /tmp/allure-history/. allure-results/history/ || echo "No history to restore"
-
       - name: Debug allure-results
         run: |
           echo "=== allure-results ==="
           ls -la allure-results/ || echo "no allure-results"
-          echo "=== history ==="
-          ls -la allure-results/history/ || echo "no history"
+          echo "=== history.jsonl ==="
+          ls -la history.jsonl || echo "no history.jsonl"
 
       - name: Generate Allure Report
         run: npm run allure:generate
 
       - name: Upload history back to S3
         run: |
-          if [ -d "allure-report/history" ]; then
-            aws s3 sync allure-report/history/ s3://${{ secrets.S3_BUCKET }}/history/ --delete
+          if [ -f "history.jsonl" ]; then
+            aws s3 cp history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl --only-show-errors
+            echo "✅ History.jsonl uploaded to S3"
           else
-            echo "No history folder found, skipping upload"
+            echo "No history file found, skipping upload"
           fi
 
       - name: Upload Allure Report to S3
