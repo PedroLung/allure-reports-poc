@@ -34,8 +34,8 @@ jobs:
 
       - name: Download Allure history from S3
         run: |
-          # Criamos a pasta se não existir para evitar erros de permissão
-          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/history.jsonl ./history.jsonl || echo "No history found"
+          # Tenta baixar, se não existir, cria um arquivo vazio pra inicializar o Allure se precisar
+          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/history.jsonl ./history.jsonl || touch history.jsonl
 
       - name: Run tests
         run: npm test
@@ -43,20 +43,26 @@ jobs:
 
       - name: Generate Allure Report
         run: |
-          # Garante que o allure vai rodar mesmo se os testes falharem
-          # O Allure v3 usa o allure.config.js automaticamente
+          # Forçamos o Allure a ler os resultados e atualizar o history.jsonl
           npm run allure:generate
 
-      - name: Upload history back to S3
-        if: always() # Importante: salvar o histórico mesmo se o teste falhar
+      - name: Check and Upload History
+        if: always()
         run: |
+          echo "Buscando o arquivo de histórico..."
+          # Se o Allure v3 gerou o arquivo, ele deve estar na raiz ou dentro do report
           if [ -f "history.jsonl" ]; then
-            aws s3 cp history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
-            echo "✅ History.jsonl atualizado no S3"
+            aws s3 cp history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl --only-show-errors
+            echo "✅ history.jsonl enviado da raiz"
+          elif [ -f "allure-report/history/history.jsonl" ]; then
+            aws s3 cp allure-report/history/history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
+            echo "✅ history.jsonl enviado de dentro do report"
+          else
+            echo "❌ Erro: history.jsonl não foi encontrado em lugar nenhum!"
+            ls -R # Lista tudo pra gente ver onde o Allure escondeu o arquivo
           fi
 
       - name: Upload Allure Report to S3
         if: always()
         run: |
-          # O sync com --delete é ótimo para manter o report limpo
           aws s3 sync allure-report/ s3://${{ secrets.S3_BUCKET }}/report/ --delete
