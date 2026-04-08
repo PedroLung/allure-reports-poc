@@ -49,27 +49,30 @@ jobs:
 
       - name: Generate Allure Report
         run: |
-          # O allure.config.js vai ler o ./history.jsonl e gerar o report com a pasta history dentro
+          # Gera o report
           npm run allure:generate
 
-      - name: Sync History back to S3
+          # Garante que a pasta history exista dentro do report
+          mkdir -p allure-report/history
+
+          # O Allure v3 pode gerar o history atualizado em dois lugares: 
+          # na raiz ou dentro do próprio report. Vamos garantir que ele esteja no report.
+          if [ -f "history.jsonl" ]; then
+            cp history.jsonl allure-report/history/history.jsonl
+            echo "✅ History copiado da raiz para o report"
+          elif [ -f "allure-report/history.jsonl" ]; then
+            mv allure-report/history.jsonl allure-report/history/history.jsonl
+            echo "✅ History movido de dentro do report para a subpasta"
+          fi
+
+      - name: Sync History for next build
         if: always()
         run: |
-          # Pegamos o histórico NOVO que o Allure acabou de gerar dentro do report e salvamos no S3 para o próximo build
-          if [ -d "allure-report/history" ]; then
-            aws s3 cp allure-report/history/history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
-            echo "✅ Histórico atualizado salvo para o próximo build."
-          fi
+          # Salva o arquivo na sua pasta externa do S3 (para o próximo build baixar)
+          aws s3 cp history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
 
       - name: Upload Allure Report to S3
         if: always()
         run: |
-          # Sobe o report completo (incluindo a pasta history que o allure:generate criou)
+          # Sobe a pasta allure-report (que agora tem a subpasta history lá dentro!)
           aws s3 sync allure-report/ s3://${{ secrets.S3_BUCKET }}/report/ --delete
-
-      - name: Invalidate CloudFront Cache
-        if: always()
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/report/*"
