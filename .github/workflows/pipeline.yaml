@@ -39,7 +39,6 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p allure-results
-          # Baixamos para a raiz para o allure.config.js encontrar
           aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/history.jsonl ./history.jsonl || touch history.jsonl
 
       - name: Run tests
@@ -49,26 +48,18 @@ jobs:
       - name: Generate Allure Report
         run: |
           npm run allure:generate
-
-          # FORÇANDO A ESTRUTURA:
-          # O Allure v3 às vezes gera o arquivo mas não cria a pasta 'history'
-          mkdir -p allure-report/history
-
-          # Se o arquivo foi atualizado na raiz, movemos para dentro do report
-          if [ -f "history.jsonl" ]; then
-            cp history.jsonl allure-report/history/history.jsonl
-            echo "✅ History manual: Raiz -> allure-report/history/"
-          fi
+          # ← REMOVA TODO O BLOCO "FORÇANDO A ESTRUTURA"
+          # Não precisa mais criar allure-report/history nem copiar nada
 
       - name: Sync History for next build
         if: always()
         run: |
-          # Agora garantimos que o S3 receba o arquivo que está DENTRO do report
-          if [ -f "allure-report/history/history.jsonl" ]; then
-            aws s3 cp allure-report/history/history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
-            echo "✅ Histórico enviado para o S3."
+          # Agora o history.jsonl já foi atualizado pela CLI (append da nova linha)
+          if [ -f "history.jsonl" ]; then
+            aws s3 cp history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
+            echo "✅ Histórico atualizado e enviado para o S3."
           else
-            echo "❌ Erro crítico: history.jsonl não encontrado nem no report."
+            echo "❌ history.jsonl não encontrado após generate."
           fi
 
       - name: Upload Allure Report to S3
