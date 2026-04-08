@@ -65,10 +65,3 @@ jobs:
         if: always()
         run: |
           aws s3 sync allure-report/ s3://${{ secrets.S3_BUCKET }}/report/ --delete
-
-      - name: Invalidate CloudFront Cache
-        if: always() # Garante que invalida mesmo se passos anteriores falharem
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/report/*"
