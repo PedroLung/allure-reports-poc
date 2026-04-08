@@ -6,7 +6,7 @@ const usuariosMock: Usuario[] = [
   { id: 3, nome: "Carlos", ativo: false },
 ];
 
-// vou dar mais um push aqui mais um aqui
+// segundo build
 
 describe("Funções utilitárias", () => {
   test("deve somar dois números corretamente", () => {
