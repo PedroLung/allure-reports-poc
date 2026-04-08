@@ -36,10 +36,12 @@ jobs:
       # ... (setup anterior igual)
 
       - name: Download Allure history from S3
-        continue-on-error: true # Importante: no build #1 o arquivo não existe no S3
+        continue-on-error: true
         run: |
+          # Criamos a pasta de resultados antes para garantir
           mkdir -p allure-results
-          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/history.jsonl ./allure-results/history.jsonl
+          # O Allure v3 busca o histórico para mesclar. Vamos baixar para a raiz como você configurou.
+          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/history.jsonl ./history.jsonl || echo "Primeira execução, sem histórico ainda."
 
       - name: Run tests
         run: npm test
@@ -47,21 +49,27 @@ jobs:
 
       - name: Generate Allure Report
         run: |
-          # O Allure v3 vai ler o history.jsonl que baixamos e mesclar com os novos resultados
+          # O allure.config.js vai ler o ./history.jsonl e gerar o report com a pasta history dentro
           npm run allure:generate
 
-      - name: Update History on S3
+      - name: Sync History back to S3
         if: always()
         run: |
-          # O Allure v3 gera o history.jsonl ATUALIZADO dentro da pasta de report
-          if [ -f "allure-report/history.jsonl" ]; then
-            aws s3 cp allure-report/history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
-            echo "✅ Histórico atualizado enviado para o S3"
-          else
-            echo "⚠️ history.jsonl não encontrado em allure-report/"
+          # Pegamos o histórico NOVO que o Allure acabou de gerar dentro do report e salvamos no S3 para o próximo build
+          if [ -d "allure-report/history" ]; then
+            aws s3 cp allure-report/history/history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
+            echo "✅ Histórico atualizado salvo para o próximo build."
           fi
 
       - name: Upload Allure Report to S3
         if: always()
         run: |
+          # Sobe o report completo (incluindo a pasta history que o allure:generate criou)
           aws s3 sync allure-report/ s3://${{ secrets.S3_BUCKET }}/report/ --delete
+
+      - name: Invalidate CloudFront Cache
+        if: always()
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/report/*"
