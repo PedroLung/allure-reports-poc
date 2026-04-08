@@ -30,12 +30,16 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Debug AWS Identity
+        run: aws sts get-caller-identity
+
       # ... (setup anterior igual)
 
       - name: Download Allure history from S3
+        continue-on-error: true # Importante: no build #1 o arquivo não existe no S3
         run: |
-          # Tenta baixar, se não existir, cria um arquivo vazio pra inicializar o Allure se precisar
-          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/history.jsonl ./history.jsonl || touch history.jsonl
+          mkdir -p allure-results
+          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/history.jsonl ./allure-results/history.jsonl
 
       - name: Run tests
         run: npm test
@@ -43,23 +47,18 @@ jobs:
 
       - name: Generate Allure Report
         run: |
-          # Forçamos o Allure a ler os resultados e atualizar o history.jsonl
+          # O Allure v3 vai ler o history.jsonl que baixamos e mesclar com os novos resultados
           npm run allure:generate
 
-      - name: Check and Upload History
+      - name: Update History on S3
         if: always()
         run: |
-          echo "Buscando o arquivo de histórico..."
-          # Se o Allure v3 gerou o arquivo, ele deve estar na raiz ou dentro do report
-          if [ -f "history.jsonl" ]; then
-            aws s3 cp history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl --only-show-errors
-            echo "✅ history.jsonl enviado da raiz"
-          elif [ -f "allure-report/history/history.jsonl" ]; then
-            aws s3 cp allure-report/history/history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
-            echo "✅ history.jsonl enviado de dentro do report"
+          # O Allure v3 gera o history.jsonl ATUALIZADO dentro da pasta de report
+          if [ -f "allure-report/history.jsonl" ]; then
+            aws s3 cp allure-report/history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
+            echo "✅ Histórico atualizado enviado para o S3"
           else
-            echo "❌ Erro: history.jsonl não foi encontrado em lugar nenhum!"
-            ls -R # Lista tudo pra gente ver onde o Allure escondeu o arquivo
+            echo "⚠️ history.jsonl não encontrado em allure-report/"
           fi
 
       - name: Upload Allure Report to S3
@@ -68,6 +67,7 @@ jobs:
           aws s3 sync allure-report/ s3://${{ secrets.S3_BUCKET }}/report/ --delete
 
       - name: Invalidate CloudFront Cache
+        if: always() # Garante que invalida mesmo se passos anteriores falharem
         run: |
           aws cloudfront create-invalidation \
             --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
