@@ -49,27 +49,31 @@ jobs:
 
       - name: Generate Allure Report
         run: |
-          # Gera o report
           npm run allure:generate
 
-          # Garante que a pasta history exista dentro do report
+          # Se o Allure v3 gerou o arquivo na subpasta errada ou na raiz, 
+          # nós padronizamos para allure-report/history/
           mkdir -p allure-report/history
 
-          # O Allure v3 pode gerar o history atualizado em dois lugares: 
-          # na raiz ou dentro do próprio report. Vamos garantir que ele esteja no report.
+          if [ -f "allure-report/history.jsonl" ]; then
+            mv allure-report/history.jsonl allure-report/history/history.jsonl
+          fi
+
+          # Se por algum motivo ele gerou na raiz
           if [ -f "history.jsonl" ]; then
             cp history.jsonl allure-report/history/history.jsonl
-            echo "✅ History copiado da raiz para o report"
-          elif [ -f "allure-report/history.jsonl" ]; then
-            mv allure-report/history.jsonl allure-report/history/history.jsonl
-            echo "✅ History movido de dentro do report para a subpasta"
           fi
 
       - name: Sync History for next build
         if: always()
         run: |
-          # Salva o arquivo na sua pasta externa do S3 (para o próximo build baixar)
-          aws s3 cp history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
+          # Só tenta subir se o arquivo realmente existir para evitar o erro 255
+          if [ -f "allure-report/history/history.jsonl" ]; then
+            aws s3 cp allure-report/history/history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
+            echo "✅ Histórico persistido no S3."
+          else
+            echo "⚠️ Nenhum histórico gerado ainda (comum no primeiro build)."
+          fi
 
       - name: Upload Allure Report to S3
         if: always()
