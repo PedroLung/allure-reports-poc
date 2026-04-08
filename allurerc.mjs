@@ -5,5 +5,3 @@ export default defineConfig({
   historyPath: "./history.jsonl",
   appendHistory: true,
 });
-
-// push
