@@ -1,23 +1,35 @@
-name: allure-update
+name: Allure Test (Local Validation)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_NAME: allure-local
+  AWS_REGION: ${{ secrets.AWS_REGION }}
 
 jobs:
-  build:
+  # =============================================================
+  # JOB 1 — Smoke
+  # =============================================================
+  e2e-allure-history-smoke:
+    name: Smoke + Allure History
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
+    timeout-minutes: 15
+    concurrency:
+      group: allure-s3-publish-${{ github.ref_name }}-smoke
+      cancel-in-progress: false
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
 
@@ -25,44 +37,232 @@ jobs:
         run: npm install
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Debug AWS Identity
-        run: aws sts get-caller-identity
+      - name: Set build metadata
+        run: |
+          echo "BUILD_ID=$(date +%Y%m%d)-$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "BRANCH_NAME=${{ github.ref_name }}"                      >> $GITHUB_ENV
+          echo "REPORT_BASE_PATH=${{ env.PROJECT_NAME }}/${{ github.ref_name }}" >> $GITHUB_ENV
 
-      # ... (setup anterior igual)
-
-      - name: Download Allure history from S3
+      # Roda apenas os testes marcados como smoke
+      # Como não temos tag de smoke nos testes, rodamos todos aqui
+      # e usamos --testNamePattern pra simular (ajuste conforme sua suite crescer)
+      - name: Run smoke tests
+        id: smoke
         continue-on-error: true
+        run: npx jest --testNamePattern="deve somar" --ci
+
+      - name: Prepare Allure metadata
+        if: always()
         run: |
           mkdir -p allure-results
-          aws s3 cp s3://${{ secrets.S3_BUCKET }}/history/history.jsonl ./history.jsonl || touch history.jsonl
+          REPORT_URL="https://s3.amazonaws.com/${{ secrets.S3_BUCKET }}/${{ env.REPORT_BASE_PATH }}/report/smoke/index.html"
+          cat > allure-results/environment.properties <<EOF
+          Repository=${{ github.repository }}
+          Branch=${{ github.ref_name }}
+          Commit=${{ github.sha }}
+          Workflow=${{ github.workflow }}
+          RunId=${{ github.run_id }}
+          RunNumber=${{ github.run_number }}
+          Suite=smoke
+          EOF
+          cat > allure-results/executor.json <<EOF
+          {
+            "name": "GitHub Actions",
+            "type": "github",
+            "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "buildOrder": ${{ github.run_number }},
+            "buildName": "${{ github.workflow }} #${{ github.run_number }}",
+            "buildUrl": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "reportUrl": "${REPORT_URL}"
+          }
+          EOF
 
-      - name: Run tests
-        run: npm test
+      - name: Download Allure history from S3 (smoke)
+        if: always()
+        run: |
+          aws s3 cp \
+            s3://${{ secrets.S3_BUCKET }}/${{ env.REPORT_BASE_PATH }}/report/smoke/history/ \
+            allure-results/history/ \
+            --recursive || echo "Nenhum histórico anterior encontrado, iniciando do zero."
+
+      - name: Generate Allure report (smoke)
+        if: always()
+        run: |
+          npm install -g allure@3 --quiet
+          allure generate allure-results --clean -o allure-report/smoke
+
+      - name: Upload smoke report to S3 (current)
+        if: always()
+        run: |
+          aws s3 sync allure-report/smoke/ \
+            s3://${{ secrets.S3_BUCKET }}/${{ env.REPORT_BASE_PATH }}/report/smoke/ \
+            --delete
+
+      - name: Upload smoke report to S3 (build backup)
+        if: always()
+        run: |
+          aws s3 sync allure-report/smoke/ \
+            s3://${{ secrets.S3_BUCKET }}/${{ env.REPORT_BASE_PATH }}/builds/${{ env.BUILD_ID }}/smoke/
+
+      - name: Upload Allure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-artifacts-smoke
+          path: |
+            allure-results
+            allure-report/smoke
+          retention-days: 7
+
+      - name: Publish job summary
+        if: always()
+        run: |
+          REPORT_URL="https://s3.amazonaws.com/${{ secrets.S3_BUCKET }}/${{ env.REPORT_BASE_PATH }}/report/smoke/index.html"
+          {
+            echo "## Allure Report — Smoke"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Suite     | smoke |"
+            echo "| Branch    | \`${{ env.BRANCH_NAME }}\` |"
+            echo "| Build ID  | \`${{ env.BUILD_ID }}\` |"
+            echo "| URL       | [Abrir relatório](${REPORT_URL}) |"
+            echo "| Run       | [Ver execução](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if smoke tests failed
+        if: steps.smoke.outcome == 'failure'
+        run: exit 1
+
+  # =============================================================
+  # JOB 2 — Regression
+  # =============================================================
+  e2e-allure-history-regression:
+    name: Regression + Allure History
+    runs-on: ubuntu-latest
+    needs: e2e-allure-history-smoke
+    if: always()
+    timeout-minutes: 15
+    concurrency:
+      group: allure-s3-publish-${{ github.ref_name }}-regression
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set build metadata
+        run: |
+          echo "BUILD_ID=$(date +%Y%m%d)-$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "BRANCH_NAME=${{ github.ref_name }}"                      >> $GITHUB_ENV
+          echo "REPORT_BASE_PATH=${{ env.PROJECT_NAME }}/${{ github.ref_name }}" >> $GITHUB_ENV
+
+      # Roda a suite completa (todos os testes = regression)
+      - name: Run regression tests
+        id: regression
         continue-on-error: true
+        run: npx jest --ci
 
-      - name: Generate Allure Report
-        run: |
-          npm run allure:generate
-          # ← REMOVA TODO O BLOCO "FORÇANDO A ESTRUTURA"
-          # Não precisa mais criar allure-report/history nem copiar nada
-
-      - name: Sync History for next build
+      - name: Prepare Allure metadata
         if: always()
         run: |
-          # Agora o history.jsonl já foi atualizado pela CLI (append da nova linha)
-          if [ -f "history.jsonl" ]; then
-            aws s3 cp history.jsonl s3://${{ secrets.S3_BUCKET }}/history/history.jsonl
-            echo "✅ Histórico atualizado e enviado para o S3."
-          else
-            echo "❌ history.jsonl não encontrado após generate."
-          fi
+          mkdir -p allure-results
+          REPORT_URL="https://s3.amazonaws.com/${{ secrets.S3_BUCKET }}/${{ env.REPORT_BASE_PATH }}/report/regression/index.html"
+          cat > allure-results/environment.properties <<EOF
+          Repository=${{ github.repository }}
+          Branch=${{ github.ref_name }}
+          Commit=${{ github.sha }}
+          Workflow=${{ github.workflow }}
+          RunId=${{ github.run_id }}
+          RunNumber=${{ github.run_number }}
+          Suite=regression
+          EOF
+          cat > allure-results/executor.json <<EOF
+          {
+            "name": "GitHub Actions",
+            "type": "github",
+            "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "buildOrder": ${{ github.run_number }},
+            "buildName": "${{ github.workflow }} #${{ github.run_number }}",
+            "buildUrl": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "reportUrl": "${REPORT_URL}"
+          }
+          EOF
 
-      - name: Upload Allure Report to S3
+      - name: Download Allure history from S3 (regression)
         if: always()
         run: |
-          aws s3 sync allure-report/ s3://${{ secrets.S3_BUCKET }}/report/ --delete
+          aws s3 cp \
+            s3://${{ secrets.S3_BUCKET }}/${{ env.REPORT_BASE_PATH }}/report/regression/history/ \
+            allure-results/history/ \
+            --recursive || echo "Nenhum histórico anterior encontrado, iniciando do zero."
+
+      - name: Generate Allure report (regression)
+        if: always()
+        run: |
+          npm install -g allure@3 --quiet
+          allure generate allure-results --clean -o allure-report/regression
+
+      - name: Upload regression report to S3 (current)
+        if: always()
+        run: |
+          aws s3 sync allure-report/regression/ \
+            s3://${{ secrets.S3_BUCKET }}/${{ env.REPORT_BASE_PATH }}/report/regression/ \
+            --delete
+
+      - name: Upload regression report to S3 (build backup)
+        if: always()
+        run: |
+          aws s3 sync allure-report/regression/ \
+            s3://${{ secrets.S3_BUCKET }}/${{ env.REPORT_BASE_PATH }}/builds/${{ env.BUILD_ID }}/regression/
+
+      - name: Upload Allure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-artifacts-regression
+          path: |
+            allure-results
+            allure-report/regression
+          retention-days: 7
+
+      - name: Publish job summary
+        if: always()
+        run: |
+          REPORT_URL="https://s3.amazonaws.com/${{ secrets.S3_BUCKET }}/${{ env.REPORT_BASE_PATH }}/report/regression/index.html"
+          {
+            echo "## Allure Report — Regression"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Suite     | regression |"
+            echo "| Branch    | \`${{ env.BRANCH_NAME }}\` |"
+            echo "| Build ID  | \`${{ env.BUILD_ID }}\` |"
+            echo "| URL       | [Abrir relatório](${REPORT_URL}) |"
+            echo "| Run       | [Ver execução](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if regression tests failed
+        if: steps.regression.outcome == 'failure'
+        run: exit 1
